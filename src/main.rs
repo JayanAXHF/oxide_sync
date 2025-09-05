@@ -17,6 +17,14 @@ mod errors;
 mod logging;
 pub mod pipeline;
 
+#[global_allocator]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+static GLOBAL: jemallocator::Jemalloc = jemallocator::Jemalloc;
+
+#[global_allocator]
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 #[tokio::main]
 async fn main() -> color_eyre::Result<()> {
     crate::errors::init()?;

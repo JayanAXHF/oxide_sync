@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use rustc_hash::FxHashMap as HashMap;
 
 use super::WeakSignatureBlock;
 
@@ -8,7 +8,7 @@ pub struct IndexTableChunk {
     index: usize,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct IndexTable {
     map: HashMap<i64, IndexTableChunk>,
 }
@@ -16,7 +16,7 @@ pub struct IndexTable {
 impl IndexTable {
     pub fn new() -> Self {
         Self {
-            map: HashMap::new(),
+            map: HashMap::default(),
         }
     }
     pub fn add(

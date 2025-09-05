@@ -211,7 +211,6 @@ impl ReceiverSSHTunnel {
 
 #[async_trait]
 impl Tunnel for ReceiverSSHTunnel {
-    #[tracing::instrument(skip(self))]
     async fn write_message(&mut self, msg: Message) -> Result<()> {
         let bin_msg = bincode::serde::encode_to_vec(msg, bincode::config::standard())?;
         let msg_len = bin_msg.len() as u32;

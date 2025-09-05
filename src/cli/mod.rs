@@ -23,6 +23,8 @@ pub struct Cli {
     pub delete: bool,
     #[arg(short, long, default_value_t = false)]
     pub recursive: bool,
+    #[arg(long, default_value_t = false)]
+    pub quiet: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]

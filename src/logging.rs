@@ -2,7 +2,11 @@ use color_eyre::Result;
 use directories::ProjectDirs;
 use std::{env, path::PathBuf, sync::LazyLock};
 use tracing_error::ErrorLayer;
-use tracing_subscriber::{EnvFilter, fmt, prelude::*};
+use tracing_subscriber::{
+    EnvFilter,
+    fmt::{self, Layer},
+    prelude::*,
+};
 
 pub const PROJECT_NAME: &str = "oxide_sync";
 pub static LOG_ENV: LazyLock<String> = LazyLock::new(|| format!("{}_LOG_LEVEL", PROJECT_NAME));
