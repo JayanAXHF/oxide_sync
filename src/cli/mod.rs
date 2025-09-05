@@ -1,7 +1,6 @@
-use clap::{Parser, Subcommand};
+use clap::Parser;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use strum::Display;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]

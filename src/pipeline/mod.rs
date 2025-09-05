@@ -6,13 +6,12 @@ mod tests;
 use async_trait::async_trait;
 use bincode::error::EncodeError;
 use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt, Stdin, Stdout},
+    io::{AsyncReadExt, AsyncWriteExt},
     process::{ChildStdin, ChildStdout, Command},
 };
 
 pub use structs::*;
 use tracing::info;
-use tracing_subscriber::fmt::format;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
