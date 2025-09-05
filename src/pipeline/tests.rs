@@ -1,4 +1,5 @@
-#![cfg(test)]
+use std::path::PathBuf;
+
 use super::*;
 use pretty_assertions::assert_eq;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, duplex};
@@ -67,4 +68,17 @@ async fn ssh_send_receive_roundtrip() -> Result<()> {
     assert_eq!(format!("{:?}", msg_in), format!("{:?}", msg_out));
 
     Ok(())
+}
+
+#[test]
+fn test_exclude() {
+    let exclude = [PathBuf::from("delta.rs")];
+    let path =
+        PathBuf::from("/Users/jayansunil/Dev/rust/obsidian_syncer/src/cryptography/delta.rs");
+    pretty_assertions::assert_eq!(
+        !exclude
+            .iter()
+            .any(|p| p.starts_with(&path) || p.ends_with(&path)),
+        true
+    );
 }

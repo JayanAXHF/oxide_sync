@@ -1,14 +1,18 @@
 mod structs;
 use std::{fmt::Display, process::Stdio};
+#[cfg(test)]
 mod tests;
 
+use async_trait::async_trait;
 use bincode::error::EncodeError;
 use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
-    process::{ChildStdin, ChildStdout},
+    io::{AsyncReadExt, AsyncWriteExt, Stdin, Stdout},
+    process::{ChildStdin, ChildStdout, Command},
 };
 
 pub use structs::*;
+use tracing::info;
+use tracing_subscriber::fmt::format;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -20,6 +24,12 @@ pub enum Error {
     Encoding(#[from] EncodeError),
     #[error("Error while decoding: {0}")]
     Decoding(#[from] bincode::error::DecodeError),
+    #[error("Unexpected message: {0}")]
+    UnexpectedMessage(Message),
+    #[error("NACK received")]
+    Nack,
+    #[error("IO timeout")]
+    IoTimeout,
 }
 
 type Result<T> = color_eyre::Result<T, Error>;
@@ -72,25 +82,24 @@ impl Display for SSHCommand {
 
 impl SSHTunnel<ChildStdin, ChildStdout> {
     pub async fn new(command: SSHCommand) -> Self {
-        let mut cmd = tokio::process::Command::new("ssh");
-        cmd.arg("-o").arg("StrictHostKeyChecking=no");
-        cmd.arg("-o").arg("UserKnownHostsFile=/dev/null");
-        cmd.arg("-o").arg("LogLevel=ERROR");
-        cmd.arg("-o").arg("ConnectTimeout=10");
-        cmd.arg("-o").arg("ServerAliveInterval=10");
-        cmd.arg("-o").arg("ServerAliveCountMax=3");
-        cmd.arg("-p").arg(command.port.to_string());
+        let mut cmd = Command::new("ssh");
         cmd.stdin(Stdio::piped());
         cmd.stdout(Stdio::piped());
-        cmd.arg(command.to_string());
-        cmd.arg(command.remote_cmd);
+
+        cmd.arg(format!("{}@{}", command.username, command.host)); // "username@host"
+        cmd.arg(command.remote_cmd.clone());
+        dbg!(&cmd);
         let mut child = cmd.spawn().unwrap();
         let stdin = child.stdin.take().unwrap();
         let stdout = child.stdout.take().unwrap();
 
         SSHTunnel { stdin, stdout }
     }
-    pub async fn write_message(&mut self, msg: Message) -> Result<()> {
+}
+
+#[async_trait]
+impl Tunnel for SSHTunnel<ChildStdin, ChildStdout> {
+    async fn write_message(&mut self, msg: Message) -> Result<()> {
         let bin_msg = bincode::serde::encode_to_vec(msg, bincode::config::standard())?;
         let msg_len = bin_msg.len() as u32;
         self.stdin.write_all(&msg_len.to_be_bytes()).await?;
@@ -98,16 +107,133 @@ impl SSHTunnel<ChildStdin, ChildStdout> {
         self.stdin.flush().await?;
         Ok(())
     }
-    pub async fn read_message(&mut self) -> Result<Message> {
+    async fn read_message(&mut self) -> Result<Message> {
+        dbg!("read message len");
         let mut len_buf = [0u8; 4];
+
         self.stdout.read_exact(&mut len_buf).await?;
+        dbg!("parse message len");
         let msg_len = u32::from_be_bytes(len_buf) as usize;
+        dbg!("read message");
         let mut buf = vec![0u8; msg_len];
         self.stdout.read_exact(&mut buf).await?;
         let (msg, _): (Message, usize) =
-            bincode::serde::decode_from_slice(&buf, bincode::config::standard())
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+            bincode::serde::decode_from_slice(&buf, bincode::config::standard())?;
+        Ok(msg)
+    }
+}
 
+impl Pipeline {
+    pub async fn new(command: SSHCommand) -> Result<Self> {
+        let tunnel = Box::new(SSHTunnel::new(command).await);
+        Ok(Self {
+            tunnel,
+            connected: PipelineState::Disconnected,
+            flist: Vec::new(),
+            stats: Vec::new(),
+        })
+    }
+    pub async fn init(&mut self) -> Result<()> {
+        self.tunnel.write_message(Message::SYNC).await?;
+        self.connected = PipelineState::Connecting;
+        let msg = self.tunnel.read_message().await?;
+        dbg!(&msg);
+        match msg {
+            Message::ACK => {
+                self.connected = PipelineState::Connected;
+                info!("ACK");
+                Ok(())
+            }
+            Message::NACK => {
+                self.connected = PipelineState::Error(Error::Nack);
+                Err(Error::Nack)
+            }
+            _ => {
+                self.connected = PipelineState::Error(Error::UnexpectedMessage(msg.clone()));
+                Err(Error::UnexpectedMessage(msg))
+            }
+        }
+    }
+    pub async fn send_arguments(&mut self, opts: crate::cli::ClientServerOpts) -> Result<()> {
+        self.tunnel
+            .write_message(Message::Arguments(opts.clone()))
+            .await?;
+        Ok(())
+    }
+    pub async fn receive_flist(&mut self) -> Result<()> {
+        loop {
+            dbg!("receive flist");
+            let msg = self.tunnel.read_message().await?;
+            dbg!(&msg);
+            match msg {
+                Message::FlistEntry(entry) => {
+                    self.flist.push(entry);
+                }
+                Message::FlistEnd => {
+                    return Ok(());
+                }
+                _ => {
+                    self.connected = PipelineState::Error(Error::UnexpectedMessage(msg.clone()));
+                    return Err(Error::UnexpectedMessage(msg));
+                }
+            }
+        }
+    }
+    pub async fn receive_stats(&mut self) -> Result<()> {
+        loop {
+            if self.connected != PipelineState::Connected {
+                return Ok(());
+            }
+            let msg = self.tunnel.read_message().await?;
+            match msg {
+                Message::Stats(stats) => {
+                    self.stats = stats;
+                }
+                Message::IoTimeout => {
+                    self.connected = PipelineState::Error(Error::IoTimeout);
+                    return Err(Error::IoTimeout);
+                }
+                _ => {
+                    self.connected = PipelineState::Error(Error::UnexpectedMessage(msg.clone()));
+                    return Err(Error::UnexpectedMessage(msg));
+                }
+            }
+        }
+    }
+}
+
+impl ReceiverSSHTunnel {
+    pub fn new() -> Self {
+        let stdin = tokio::io::stdin();
+        let stdout = tokio::io::stdout();
+        ReceiverSSHTunnel { stdin, stdout }
+    }
+}
+
+#[async_trait]
+impl Tunnel for ReceiverSSHTunnel {
+    #[tracing::instrument(skip(self))]
+    async fn write_message(&mut self, msg: Message) -> Result<()> {
+        let bin_msg = bincode::serde::encode_to_vec(msg, bincode::config::standard())?;
+        let msg_len = bin_msg.len() as u32;
+        info!("write message len {}", msg_len);
+        self.stdout.write_all(&msg_len.to_be_bytes()).await?;
+        self.stdout.write_all(&bin_msg).await?;
+        self.stdout.flush().await?;
+        Ok(())
+    }
+    async fn read_message(&mut self) -> Result<Message> {
+        let mut len_buf = [0u8; 4];
+        dbg!("read message len");
+        self.stdin.read_exact(&mut len_buf).await?;
+        let msg_len = u32::from_be_bytes(len_buf) as usize;
+
+        dbg!("read message");
+        let mut buf = vec![0u8; msg_len];
+        self.stdin.read_exact(&mut buf).await?;
+        let (msg, _): (Message, usize) =
+            bincode::serde::decode_from_slice(&buf, bincode::config::standard())?;
+        dbg!(&msg);
         Ok(msg)
     }
 }

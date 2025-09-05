@@ -16,6 +16,7 @@ pub static DATA_FOLDER: LazyLock<Option<PathBuf>> = LazyLock::new(|| {
 
 pub fn init() -> Result<()> {
     let directory = get_data_dir();
+    dbg!(&directory);
     std::fs::create_dir_all(&directory)?;
     let log_path = directory.join(&*LOG_FILE);
     let log_file = std::fs::File::create(log_path)?;
@@ -56,5 +57,5 @@ pub fn get_data_dir() -> PathBuf {
 }
 
 fn project_directory() -> Option<ProjectDirs> {
-    ProjectDirs::from("com", "modder_rs", env!("CARGO_PKG_NAME"))
+    ProjectDirs::from("com", "oxide_sync", env!("CARGO_PKG_NAME"))
 }

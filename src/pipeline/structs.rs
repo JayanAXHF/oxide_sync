@@ -1,7 +1,12 @@
+use async_trait::async_trait;
 use derive_setters::Setters;
 use serde::{Deserialize, Serialize};
 use strum::Display;
-use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::io::{AsyncRead, AsyncWrite, Stdin, Stdout};
+
+use crate::cli::ClientServerOpts;
+
+use super::Result;
 
 #[derive(Debug, Clone, Setters)]
 pub struct SSHCommand {
@@ -27,8 +32,12 @@ pub struct DataMessage {
     pub file_index: u32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Display)]
 pub enum Message {
+    SYNC,
+    ACK,
+    NACK,
+    Arguments(ClientServerOpts),
     Data(DataMessage),
     Redo(u32),
     Done,                   // MSG_DONE
@@ -58,10 +67,49 @@ pub struct FlistEntry {
     pub index: u32,       // file index (assigned by sender)
     pub filename: String, // path relative to the sync root
     pub size: u64,        // file size in bytes
-    pub mtime: u64,       // modification time (epoch seconds)
+    pub mtime: i64,       // modification time (epoch seconds)
     pub mode: u32,        // permissions (POSIX-style)
     pub uid: Option<u32>, // optional owner user id
     pub gid: Option<u32>, // optional group id
     pub is_dir: bool,     // directory marker
     pub is_symlink: bool, // symlink marker
+}
+
+pub struct Pipeline {
+    pub tunnel: Box<dyn Tunnel>,
+    pub connected: PipelineState,
+    pub flist: Vec<FlistEntry>,
+    pub stats: Vec<u8>,
+}
+
+#[derive(Debug, Default)]
+pub enum PipelineState {
+    #[default]
+    Disconnected,
+    Connecting,
+    Connected,
+    Error(super::Error),
+}
+
+impl PartialEq for PipelineState {
+    fn eq(&self, other: &Self) -> bool {
+        matches!(
+            (self, other),
+            (PipelineState::Disconnected, PipelineState::Disconnected)
+                | (PipelineState::Connecting, PipelineState::Connecting)
+                | (PipelineState::Connected, PipelineState::Connected)
+                | (PipelineState::Error(_), PipelineState::Error(_))
+        )
+    }
+}
+
+pub struct ReceiverSSHTunnel {
+    pub stdin: Stdin,
+    pub stdout: Stdout,
+}
+
+#[async_trait]
+pub trait Tunnel {
+    async fn write_message(&mut self, msg: Message) -> Result<()>;
+    async fn read_message(&mut self) -> Result<Message>;
 }
