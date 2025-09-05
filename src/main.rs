@@ -107,7 +107,7 @@ async fn main() -> color_eyre::Result<()> {
                                 if !opts
                                     .exclude
                                     .iter()
-                                    .any(|p| p.starts_with(e.path()) || p.ends_with(e.path()))
+                                    .any(|p| e.path().starts_with(p) || e.path().ends_with(p))
                                 {
                                     return None;
                                 }
