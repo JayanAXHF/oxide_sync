@@ -169,6 +169,7 @@ impl Pipeline {
                     self.flist.push(entry);
                 }
                 Message::FlistEnd => {
+                    dbg!("flist end");
                     return Ok(());
                 }
                 _ => {
@@ -199,6 +200,9 @@ impl Pipeline {
             }
         }
     }
+    pub async fn process_flist(&mut self) -> Result<()> {
+        todo!()
+    }
 }
 
 impl ReceiverSSHTunnel {
@@ -206,6 +210,12 @@ impl ReceiverSSHTunnel {
         let stdin = tokio::io::stdin();
         let stdout = tokio::io::stdout();
         ReceiverSSHTunnel { stdin, stdout }
+    }
+}
+
+impl Default for ReceiverSSHTunnel {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

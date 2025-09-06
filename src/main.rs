@@ -8,7 +8,7 @@ use itertools::Itertools;
 use pipeline::{
     FlistEntry, Message, Pipeline, ReceiverSSHTunnel, SSHCommand, SSHMessageError, Tunnel,
 };
-use regex::Regex;
+use regex_lite::Regex;
 use tracing::info;
 
 pub mod cli;
@@ -17,13 +17,8 @@ mod errors;
 mod logging;
 pub mod pipeline;
 
-#[global_allocator]
-#[cfg(any(target_os = "linux", target_os = "macos"))]
-static GLOBAL: jemallocator::Jemalloc = jemallocator::Jemalloc;
-
-#[global_allocator]
-#[cfg(not(any(target_os = "linux", target_os = "macos")))]
-static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+// #[global_allocator]
+// static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 #[tokio::main]
 async fn main() -> color_eyre::Result<()> {
@@ -134,6 +129,7 @@ async fn main() -> color_eyre::Result<()> {
                             })
                             .collect_vec()
                     };
+                    info!("server: flist start");
                     for (entry, idx) in files.iter().zip(0..) {
                         let indexed_file = FlistEntry {
                             index: idx,
@@ -142,8 +138,11 @@ async fn main() -> color_eyre::Result<()> {
                         let msg = Message::FlistEntry(indexed_file.clone());
                         tunnel.write_message(msg).await?;
                         flist.push(indexed_file);
-                        info!("flist entry: {:?}", entry);
+                        info!("server: flist entry: {:?}", entry);
                     }
+                    let msg = Message::FlistEnd;
+                    tunnel.write_message(msg).await?;
+                    info!("server: flist end");
                 }
                 Message::Arguments(args) => {
                     info!("arguments: {:?}", args);
@@ -176,7 +175,7 @@ async fn main() -> color_eyre::Result<()> {
             port,
             username: username.into(),
             password: None,
-            remote_cmd: "/Users/jayansunil/Dev/rust/oxide_sync/target/debug/oxide_sync --server"
+            remote_cmd: "/Users/jayansunil/Dev/rust/oxide_sync/target/aarch64-apple-darwin/release/oxide_sync --server"
                 .to_string(),
         })
         .await?;
