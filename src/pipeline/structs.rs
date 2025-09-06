@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use strum::Display;
 use tokio::io::{AsyncRead, AsyncWrite, Stdin, Stdout};
 
-use crate::cli::ClientServerOpts;
+use crate::{cli::ClientServerOpts, cryptography::IndexTable};
 
 use super::Result;
 
@@ -27,8 +27,7 @@ pub struct SSHTunnel<W: AsyncWrite + Unpin, R: AsyncRead + Unpin> {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DataMessage {
-    pub offset: u64,
-    pub bytes: Vec<u8>,
+    pub map: IndexTable,
     pub file_index: u32,
 }
 
@@ -44,6 +43,7 @@ pub enum Message {
     Error(SSHMessageError), // MSG_ERROR
     Info(String),           // MSG_INFO
     Warning(String),        // MSG_WARNING
+    FileIndex(u32),         // MSG_FILE_INDEX
     FlistEntry(FlistEntry), // MSG_FLIST
     FlistEnd,               // MSG_FLIST_END
     Restore(Vec<u8>),       // MSG_RESTORE

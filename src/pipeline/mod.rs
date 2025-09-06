@@ -173,8 +173,9 @@ impl Pipeline {
                     return Ok(());
                 }
                 _ => {
-                    self.connected = PipelineState::Error(Error::UnexpectedMessage(msg.clone()));
-                    return Err(Error::UnexpectedMessage(msg));
+                    //   self.connected = PipelineState::Error(Error::UnexpectedMessage(msg.clone()));
+                    //  return Err(Error::UnexpectedMessage(msg));
+                    continue;
                 }
             }
         }

@@ -1,14 +1,15 @@
 use rustc_hash::FxHashMap as HashMap;
+use serde::{Deserialize, Serialize};
 
 use super::WeakSignatureBlock;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct IndexTableChunk {
     strong_signature: String,
     index: usize,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct IndexTable {
     map: HashMap<i64, IndexTableChunk>,
 }
