@@ -23,8 +23,10 @@ pub mod pipeline;
 #[tokio::main]
 async fn main() -> color_eyre::Result<()> {
     crate::errors::init()?;
-    crate::logging::init()?;
     let cli = Cli::parse();
+    if !cli.quiet {
+        crate::logging::init()?;
+    }
     let server = cli.server;
     if server {
         let mut tunnel = ReceiverSSHTunnel::new();

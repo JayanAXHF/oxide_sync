@@ -1,4 +1,5 @@
 use super::*;
+use color_eyre::eyre::Result;
 use pretty_assertions::assert_eq;
 use std::fs::{self, File};
 use std::io::Write;
@@ -116,4 +117,90 @@ fn test_invalid_index_returns_error() {
 
     let result = delta.apply(&base, 5);
     assert!(result.is_err());
+}
+
+#[tokio::test]
+async fn test_delta_patch_reconstructs_file() -> Result<()> {
+    // Simulated "old file"
+    let old_data = b"Hello, world!\nThis is the old file.\n".to_vec();
+
+    // Target "new file"
+    let new_data = b"Hello, world!\nThis is the NEW file!!!\n".to_vec();
+
+    // Build a delta manually:
+    // - Reuse first block ("Hello, world!\nThis is the ")
+    // - Replace "old file.\n" with "NEW file!!!\n"
+    let mut delta = Delta::new();
+    delta.add_block(b"Hello, world!\nThis is the ".to_vec());
+    delta.add_block(b"NEW file!!!\n".to_vec());
+
+    assert!(delta.is_valid());
+
+    // Apply patch
+    let reconstructed = delta.apply(&old_data, 0)?; // 0 = arbitrary block size for now
+
+    // Verify reconstruction
+    assert_eq!(reconstructed, new_data);
+    Ok(())
+}
+
+#[test]
+fn test_diff_and_apply_roundtrip() {
+    let base = b"The quick brown fox jumps over the lazy dog";
+    let new = b"The quick brown cat jumps over the lazy dog with style";
+
+    let block_size = 8;
+
+    // Compute the delta between base and new
+    let delta = Delta::diff(base, new, block_size);
+
+    // Apply the delta to reconstruct new from base
+    let reconstructed = delta.apply(base, block_size).expect("apply should succeed");
+
+    assert_eq!(
+        reconstructed, new,
+        "Reconstructed file must match the new file"
+    );
+}
+
+#[test]
+fn test_diff_with_small_tail() {
+    let base = b"abcdefg";
+    let new = b"abcxyzg"; // change middle, tail smaller than block size
+    let block_size = 4;
+
+    let delta = Delta::diff(base, new, block_size);
+    let reconstructed = delta.apply(base, block_size).expect("apply should succeed");
+
+    assert_eq!(reconstructed, new, "Handles tail shorter than block size");
+}
+
+#[test]
+fn test_diff_all_new_data() {
+    let base = b"aaaaaa";
+    let new = b"bbbbbb";
+    let block_size = 3;
+
+    let delta = Delta::diff(base, new, block_size);
+    let reconstructed = delta.apply(base, block_size).expect("apply should succeed");
+
+    assert_eq!(
+        reconstructed, new,
+        "No matches should still reconstruct correctly"
+    );
+}
+
+#[test]
+fn test_diff_base_smaller_than_block() {
+    let base = b"hi";
+    let new = b"hello";
+    let block_size = 4;
+
+    let delta = Delta::diff(base, new, block_size);
+    let reconstructed = delta.apply(base, block_size).expect("apply should succeed");
+
+    assert_eq!(
+        reconstructed, new,
+        "Should work when base is smaller than block size"
+    );
 }

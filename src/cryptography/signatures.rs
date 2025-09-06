@@ -23,30 +23,43 @@ impl WeakSignature {
     }
 
     pub fn sign(&self, offset: usize) -> WeakSignatureBlock {
-        let r1 = (self.data[offset..offset + self.block_size]
-            .iter()
-            .sum::<u8>() as i64)
-            % MODULUS;
-        let r2 = (self.data[offset..offset + self.block_size]
+        let block = &self.data[offset..offset + self.block_size];
+
+        let r1 = block.iter().map(|&b| b as i64).sum::<i64>() % MODULUS;
+
+        let r2 = block
             .iter()
             .enumerate()
-            .map(|(i, a)| (self.block_size - i) * *a as usize))
-        .sum::<usize>() as i64
+            .map(|(i, &a)| (self.block_size as i64 - i as i64) * a as i64)
+            .sum::<i64>()
             % MODULUS;
-        let r = r1 + MODULUS * r2;
-        return WeakSignatureBlock::new(offset as u64, r, r1, r2);
+
+        let r = (r1 + MODULUS * r2) % (MODULUS * MODULUS);
+        WeakSignatureBlock::new(offset as u64, r, r1, r2)
     }
-    pub fn compute_next_signature(&self, prev_sig: WeakSignatureBlock) -> WeakSignatureBlock {
-        let new_offset = prev_sig.offset + 1;
-        let r1 = (prev_sig.r1 - self.data[prev_sig.offset as usize] as i64
-            + self.data[prev_sig.offset as usize + self.block_size] as i64)
-            % MODULUS;
-        let r2 = (prev_sig.r2
-            - self.block_size as i64 * self.data[prev_sig.offset as usize] as i64
-            + r1)
-            % MODULUS;
-        let r = r1 + MODULUS * r2;
-        return WeakSignatureBlock::new(new_offset, r, r1, r2);
+
+    pub fn compute_next_signature(&self, prev: WeakSignatureBlock) -> WeakSignatureBlock {
+        let new_offset = prev.offset + 1;
+        let old_idx = prev.offset as usize;
+        let new_idx = old_idx + self.block_size;
+
+        if new_idx >= self.data.len() {
+            // Can't roll further
+            return prev;
+        }
+
+        let old_byte = self.data[old_idx] as i64;
+        let new_byte = self.data[new_idx] as i64;
+
+        let mut r1 = prev.r1 - old_byte + new_byte;
+        r1 = ((r1 % MODULUS) + MODULUS) % MODULUS; // keep positive
+
+        let mut r2 = prev.r2 - (self.block_size as i64 * old_byte) + r1;
+        r2 = ((r2 % MODULUS) + MODULUS) % MODULUS;
+
+        let r = (r1 + MODULUS * r2) % (MODULUS * MODULUS);
+
+        WeakSignatureBlock::new(new_offset, r, r1, r2)
     }
 }
 

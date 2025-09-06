@@ -3,6 +3,10 @@ use std::fs::File;
 use std::io::{self, Read, Write};
 use std::path::Path;
 
+use crate::cryptography::MODULUS;
+
+use super::{IndexTable, WeakSignature, WeakSignatureBlock, compute_strong_signature, index_table};
+
 #[derive(Debug, Clone)]
 pub enum Ops {
     Index(usize),
@@ -104,6 +108,123 @@ impl Delta {
         out_file.write_all(&new_bytes)?;
 
         Ok(())
+    }
+
+    pub fn diff(base: &[u8], new: &[u8], block_size: usize) -> Self {
+        use std::mem;
+
+        let mut index_table = IndexTable::new();
+
+        // Build index table from base file
+        let signer_base = WeakSignature::new(block_size, base.into());
+        if base.len() < block_size {
+            let strong = compute_strong_signature(base);
+            // store a dummy weak signature (e.g. hash of entire base)
+            let weak_val: i64 = base.iter().map(|&b| b as i64).sum::<i64>() % MODULUS;
+            let weak = WeakSignatureBlock::new(0, weak_val, weak_val, weak_val);
+            index_table.add(weak, strong, 0);
+        } else {
+            // Normal case: compute rolling weak + strong for each base block
+            let mut prev_hash: Option<WeakSignatureBlock> = None;
+            for (i, block) in base.chunks_exact(block_size).enumerate() {
+                if i == 0 {
+                    let sign = signer_base.sign(0);
+                    let strong = compute_strong_signature(block);
+                    index_table.add(sign.clone(), strong, 0);
+                    prev_hash = Some(sign);
+                } else {
+                    // roll from previous
+                    let rolling = signer_base.compute_next_signature(prev_hash.clone().unwrap());
+                    let strong = compute_strong_signature(block);
+                    index_table.add(rolling.clone(), strong, i);
+                    prev_hash = Some(rolling);
+                }
+            }
+        }
+
+        let mut delta = Delta::new();
+
+        // If the new file is shorter than block_size, nothing to roll — emit whole new as block.
+        if new.len() < block_size {
+            if !new.is_empty() {
+                delta.add_block(new.to_vec());
+            }
+            return delta;
+        }
+
+        // Prepare to scan `new`
+        let signer_new = WeakSignature::new(block_size, new.into());
+        let mut unmatched_buffer: Vec<u8> = Vec::new();
+        let mut i: usize = 0;
+
+        // Initialize prev_hash for position 0
+        let mut prev_hash: Option<WeakSignatureBlock> = Some(signer_new.sign(0));
+
+        // Slide while there is a full window
+        while i + block_size <= new.len() {
+            // Ensure we have a hash for current position
+            let cur_hash = match prev_hash.clone() {
+                Some(h) => h,
+                None => {
+                    // If we don't have a prev_hash, compute it directly
+                    let s = signer_new.sign(i);
+                    prev_hash = Some(s.clone());
+                    s
+                }
+            };
+
+            // Check index table for weak match
+            if let Some((base_index, strong)) = index_table.find(cur_hash.get_signature()) {
+                // Verify with strong signature on the new window
+                let strong2 = compute_strong_signature(&new[i..i + block_size]);
+                if strong == strong2 {
+                    // Found a match — flush any unmatched data first
+                    if !unmatched_buffer.is_empty() {
+                        delta.add_block(mem::take(&mut unmatched_buffer));
+                    }
+                    // Emit index referring to base block
+                    delta.add_index(base_index);
+
+                    // Jump forward by a full block
+                    i += block_size;
+
+                    // If we still can produce full windows, set prev_hash to sign(i)
+                    if i + block_size <= new.len() {
+                        prev_hash = Some(signer_new.sign(i));
+                    } else {
+                        prev_hash = None;
+                    }
+                    continue;
+                }
+            }
+
+            // No match at current window:
+            // Append a single byte (the current byte) to unmatched buffer and slide by 1
+            unmatched_buffer.push(new[i]);
+            i += 1;
+
+            // Update rolling hash for the new window if possible
+            if i + block_size <= new.len() {
+                // roll from previous cur_hash
+                let next_hash = signer_new.compute_next_signature(cur_hash);
+                prev_hash = Some(next_hash);
+            } else {
+                // not enough bytes left for a full window -> no further rolling hashes
+                prev_hash = None;
+            }
+        }
+
+        // Append any remaining tail bytes (less than a full block) to the unmatched buffer
+        if i < new.len() {
+            unmatched_buffer.extend_from_slice(&new[i..]);
+        }
+
+        // Flush unmatched buffer if non-empty
+        if !unmatched_buffer.is_empty() {
+            delta.add_block(unmatched_buffer);
+        }
+
+        delta
     }
 }
 
